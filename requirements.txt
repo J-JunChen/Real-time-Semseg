@@ -1,0 +1,12 @@
+# cuda==10.2
+# 4 x Nvidia RTX 2080Ti
+# python==3.6.9
+
+numpy==1.19.4
+torch==1.6.0
+torchvision==0.7.0
+tqdm==4.54.1
+opencv-python==4.4.0.46
+tensorboard==1.14.0 # Visualization: $ tensorboard --logdir=exp/cityscapes --bind_all
+tensorboardX    
+pyyaml
