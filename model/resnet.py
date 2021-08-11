@@ -1,3 +1,6 @@
+# paper title: Deep Residual Learning for Image Recognition
+# paper link: https://openaccess.thecvf.com/content_cvpr_2016/html/He_Deep_Residual_Learning_CVPR_2016_paper.html
+
 import torch
 from torch import Tensor
 import torch.nn as nn
@@ -21,8 +24,8 @@ model_urls = {
 local_urls = {
     'resnet18': '/home/cjj/pretrained/resnet18-5c106cde.pth',
     'resnet34': '/home/cjj/pretrained/resnet34-333f7ec4.pth',
-    # 'resnet50': '/home/cjj/pretrained/resnet50-19c8e357.pth',
-    'resnet50': '/home/cjj/pretrained/resnet50-imagenet.pth',
+    'resnet50': '/home/cjj/pretrained/resnet50-19c8e357.pth',
+    # 'resnet50': '/home/cjj/pretrained/resnet50-imagenet.pth',
     'resnet101': '/home/cjj/pretrained/resnet101-5d3b4d8f.pth',
     'resnet152': '/home/cjj/pretrained/resnet152-b121ed2d.pth',
 }
@@ -210,6 +213,7 @@ class ResNet(nn.Module):
 
         return x
 
+
 def resnet18(pretrained=False, **kwargs):
     model = ResNet(BasicBlock, [2, 2, 2, 2], **kwargs)
     if pretrained:
@@ -220,6 +224,7 @@ def resnet18(pretrained=False, **kwargs):
             model.load_state_dict(torch.load(
                 local_urls['resnet18']), strict=False)
     return model
+
 
 def resnet34(pretrained=False, **kwargs):
     model = ResNet(BasicBlock, [3, 4, 6, 3], **kwargs)
@@ -232,6 +237,7 @@ def resnet34(pretrained=False, **kwargs):
                 local_urls['resnet34']), strict=False)
     return model
 
+
 def resnet50(pretrained=False, deep_base=False, **kwargs):
     model = ResNet(Bottleneck, [3, 4, 6, 3], deep_base=deep_base, **kwargs)
     if pretrained:
@@ -243,6 +249,7 @@ def resnet50(pretrained=False, deep_base=False, **kwargs):
                 local_urls['resnet50']), strict=False)
     return model
 
+
 def resnet101(pretrained=False, deep_base=False, **kwargs):
     model = ResNet(Bottleneck, [3, 4, 23, 3], deep_base=deep_base, **kwargs)
     if pretrained:
@@ -253,6 +260,7 @@ def resnet101(pretrained=False, deep_base=False, **kwargs):
             model.load_state_dict(torch.load(
                 local_urls['resnet101']), strict=False)
     return model
+
 
 def resnet152(pretrained=False, deep_base=False, **kwargs):
     model = ResNet(Bottleneck, [3, 8, 36, 3], deep_base=deep_base, **kwargs)

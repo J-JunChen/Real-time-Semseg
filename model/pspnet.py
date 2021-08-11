@@ -1,3 +1,6 @@
+# paper title: Pyramid scene parsing network
+# paper link: https://openaccess.thecvf.com/content_cvpr_2017/html/Zhao_Pyramid_Scene_Parsing_CVPR_2017_paper.html
+
 import torch
 from torch import nn
 import torch.nn.functional as F

@@ -54,6 +54,8 @@ def check(args):
     assert args.zoom_factor in [1, 2, 4, 8]
     if args.arch == 'psp':
         assert (args.train_h - 1) % 8 == 0 and (args.train_w - 1) % 8 == 0
+    elif args.arch == 'bise_v1':
+        assert (args.train_h - 1) % 8 == 0 and (args.train_w - 1) % 8 == 0
     elif args.arch == 'psa':
         pass
     else:
@@ -104,6 +106,11 @@ def main_worker(gpu, ngpus_per_node, argss):
         model = PSPNet(layers=args.layers, classes=args.classes, zoom_factor=args.zoom_factor, criterion=criterion)
         modules_ori = [model.layer0, model.layer1, model.layer2, model.layer3, model.layer4]
         modules_new = [model.ppm, model.cls, model.aux]
+    elif args.arch == 'bise_v1':
+        from model.bisenet_v1 import BiseNet
+        model = BiseNet(num_classes=args.classes, criterion=criterion)
+        modules_ori = [model.sp, model.cp]
+        modules_new = [model.ffm, model.conv_out, model.conv_out16, model.conv_out32]
     params_list = []
     for module in modules_ori:
         params_list.append(dict(params=module.parameters(), lr=args.base_lr))
@@ -127,7 +134,7 @@ def main_worker(gpu, ngpus_per_node, argss):
         args.batch_size = int(args.batch_size / ngpus_per_node)
         args.batch_size_val = int(args.batch_size_val / ngpus_per_node)
         args.workers = int((args.workers + ngpus_per_node - 1) / ngpus_per_node)
-        model = torch.nn.parallel.DistributedDataParallel(model.cuda(), device_ids=[gpu])
+        model = torch.nn.parallel.DistributedDataParallel(model.cuda(), device_ids=[gpu], find_unused_parameters=True)
     else:
         model = torch.nn.DataParallel(model.cuda())
     
