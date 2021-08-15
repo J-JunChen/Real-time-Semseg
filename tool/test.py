@@ -84,7 +84,7 @@ def main():
     if not args.has_prediction:
         if args.arch == 'psp':
             from model.pspnet import PSPNet
-            model = PSPNet(layers=args.layers, classes=args.classes, zoom_factor=args.zoom_factor, pretrained=False)
+            model = PSPNet(layers=args.layers, classes=args.classes, zoom_factor=args.zoom_factor)
         elif args.arch == 'bise_v1':
             from model.bisenet_v1 import BiseNet
             model = BiseNet(num_classes=args.classes)

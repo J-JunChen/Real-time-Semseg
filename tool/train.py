@@ -17,15 +17,19 @@ import torch.multiprocessing as mp
 import torch.distributed as dist
 from tensorboardX import SummaryWriter
 
+from model.pspnet import PSPNet
+from model.bisenet_v1 import BiseNet
+
 from utils import dataset, transform, config
-from utils.util import AverageMeter, poly_learning_rate, intersectionAndUnionGPU, find_free_port
+from utils.util import AverageMeter, poly_learning_rate, intersectionAndUnionGPU, find_free_port, save_checkpoint
+from loss.kd_loss import kd_loss_fn
 
 cv2.ocl.setUseOpenCL(False)
 cv2.setNumThreads(0)
 
 def get_parser():
     parser = argparse.ArgumentParser(description='Pytorch Semantic Segmentation')
-    parser.add_argument('--config', type=str, default='config/cityscapes/cityscapes_pspnet50.yaml', help='config file')
+    parser.add_argument('--config', type=str, default='config/cityscapes/cityscapes_pspnet_kd.yaml', help='config file')
     parser.add_argument('opts', help='see config/cityscapes/cityscapes_pspnet50.yaml for all options', default=None, nargs=argparse.REMAINDER)
     args = parser.parse_args()
     assert args.config is not None
@@ -101,14 +105,18 @@ def main_worker(gpu, ngpus_per_node, argss):
         dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url, world_size=args.world_size, rank=args.rank)
 
     criterion = nn.CrossEntropyLoss(ignore_index=args.ignore_label)
+    teacher_model = None
+    if args.teacher_model_path:
+        teacher_model = PSPNet(layers=args.teacher_layers, classes=args.classes, zoom_factor=args.zoom_factor)
+        print("=> loading teacher checkpoint '{}'".format(args.teacher_model_path))
+        checkpoint = torch.load(args.teacher_model_path)
+        teacher_model.load_state_dict(checkpoint['state_dict'], strict=False)
     if args.arch == 'psp':
-        from model.pspnet import PSPNet
-        model = PSPNet(layers=args.layers, classes=args.classes, zoom_factor=args.zoom_factor, criterion=criterion)
+        model = PSPNet(layers=args.layers, classes=args.classes, zoom_factor=args.zoom_factor)
         modules_ori = [model.layer0, model.layer1, model.layer2, model.layer3, model.layer4]
         modules_new = [model.ppm, model.cls, model.aux]
     elif args.arch == 'bise_v1':
-        from model.bisenet_v1 import BiseNet
-        model = BiseNet(num_classes=args.classes, criterion=criterion)
+        model = BiseNet(num_classes=args.classes)
         modules_ori = [model.sp, model.cp]
         modules_new = [model.ffm, model.conv_out, model.conv_out16, model.conv_out32]
     params_list = []
@@ -120,6 +128,8 @@ def main_worker(gpu, ngpus_per_node, argss):
     optimizer = torch.optim.SGD(params_list, lr=args.base_lr, momentum=args.momentum, weight_decay=args.weight_decay)
     if args.sync_bn:
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
+        if teacher_model is not None:
+            teacher_model = nn.SyncBatchNorm.convert_sync_batchnorm(teacher_model)
 
     if main_process():
         global logger, writer
@@ -129,15 +139,22 @@ def main_worker(gpu, ngpus_per_node, argss):
         logger.info("=> creating model ...")
         logger.info("Classes: {}".format(args.classes))
         logger.info(model)
+        if teacher_model is not None:
+            logger.info(teacher_model)
     if args.distributed:
         torch.cuda.set_device(gpu)
         args.batch_size = int(args.batch_size / ngpus_per_node)
         args.batch_size_val = int(args.batch_size_val / ngpus_per_node)
         args.workers = int((args.workers + ngpus_per_node - 1) / ngpus_per_node)
         model = torch.nn.parallel.DistributedDataParallel(model.cuda(), device_ids=[gpu], find_unused_parameters=True)
+        if teacher_model is not None:
+            teacher_model = torch.nn.parallel.DistributedDataParallel(teacher_model.cuda(), device_ids=[gpu], find_unused_parameters=True)
+
     else:
         model = torch.nn.DataParallel(model.cuda())
-    
+        if teacher_model is not None:
+            teacher_model = torch.nn.DataParallel(teacher_model.cuda())
+            
     if args.weight:
         if os.path.isfile(args.weight):
             if main_process():
@@ -150,6 +167,7 @@ def main_worker(gpu, ngpus_per_node, argss):
             if main_process():
                 logger.info("=> mp weight found at '{}'".format(args.weight))
     
+    best_mIoU_val = 0.0
     if args.resume:
         if os.path.isfile(args.resume):
             if main_process():
@@ -159,6 +177,7 @@ def main_worker(gpu, ngpus_per_node, argss):
             args.start_epoch = checkpoint['epoch']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
+            best_mIoU_val = checkpoint['best_mIoU_val']
             if main_process():
                 logger.info("=> loaded checkpoint '{}' (epoch {})".format(args.resume, checkpoint['point']))
         else:
@@ -203,20 +222,14 @@ def main_worker(gpu, ngpus_per_node, argss):
         if args.distributed:
             # Use .set_epoch() method to reshuffle the dataset partition at every iteration
             train_sampler.set_epoch(epoch)
-        loss_train, mIoU_train, mAcc_train, allAcc_train = train(train_loader, model, optimizer, epoch)
+        loss_train, mIoU_train, mAcc_train, allAcc_train = train(train_loader, model, teacher_model, criterion, optimizer, epoch)
         if main_process():
             writer.add_scalar('loss_train', loss_train, epoch_log)
             writer.add_scalar('mIoU_train', mIoU_train, epoch_log)
             writer.add_scalar('mAcc_train', mAcc_train, epoch_log)
             writer.add_scalar('allAcc_train', allAcc_train, epoch_log)
-
-        if (epoch_log % args.save_freq == 0) and main_process():
-            filename = args.save_path + '/train_epoch_' + str(epoch_log) + '.pth'
-            logger.info('Saving checkpoint to:' + filename)
-            torch.save({'epoch': epoch_log, 'state_dict': model.state_dict(), 'optimizer': optimizer.state_dict()}, filename)
-            if epoch_log / args.save_freq > 2:
-                deletename = args.save_path + '/train_epoch_' + str(epoch_log - args.save_freq * 2) +'.pth'
-                os.remove(deletename)
+        
+        is_best = False
         if args.evaluate:
             loss_val, mIoU_val, mAcc_val, allAcc_val = validate(val_loader, model, criterion)
             if main_process():
@@ -224,11 +237,32 @@ def main_worker(gpu, ngpus_per_node, argss):
                 writer.add_scalar('mIoU_val', mIoU_val, epoch_log)
                 writer.add_scalar('mAcc_val', mAcc_val, epoch_log)
                 writer.add_scalar('allAcc_val', allAcc_val, epoch_log)
+
+                if best_mIoU_val < mIoU_val:
+                    is_best = True
+                    best_mIoU_val = mIoU_val
+                    logger.info('==>The best val mIoU: %.3f' % (best_mIoU_val))
+
+        
+        if (epoch_log % args.save_freq == 0) and main_process():
+            save_checkpoint(
+                {
+                    'epoch': epoch_log, 
+                    'state_dict': model.state_dict(), 
+                    'optimizer': optimizer.state_dict(),
+                    'best_mIoU_val': best_mIoU_val
+                }, 
+                is_best, 
+                args.save_path
+            )
+            logger.info('Saving checkpoint to:' + args.save_path + '/train_epoch_' + str(epoch_log) + '.pth' )
+
     if main_process():  
         writer.close() # it must close the writer, otherwise it will appear the EOFError!
+        logger.info('==>Training done!\nBest mIoU: %.3f' % (best_mIoU_val))
 
 
-def train(train_loader, model, optimizer, epoch):
+def train(train_loader, model, teacher_model, criterion, optimizer, epoch):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     main_loss_meter = AverageMeter()
@@ -240,6 +274,8 @@ def train(train_loader, model, optimizer, epoch):
 
     # switch to train mode
     model.train()
+    if teacher_model is not None:
+        teacher_model.eval()
     end = time.time()
     max_iter = args.epochs * len(train_loader) # initialize for poly learning rate 
     for i, (input, target) in enumerate(train_loader):
@@ -251,7 +287,16 @@ def train(train_loader, model, optimizer, epoch):
             target = F.interpolate(target.unsqueeze(1).float(), size=(h, w), mode='bilinear', align_corners=True).squeeze(1).long()
         input = input.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
-        output, main_loss, aux_loss = model(input, target)
+        main_out, aux_out = model(input, target)
+        if teacher_model is not None:
+            with torch.no_grad():
+                teacher_out = teacher_model(input)
+            main_loss = kd_loss_fn(main_out, target, teacher_out, alpha=args.alpha, temperature=args.temperature)
+            del teacher_out # delete the teacher_out for releasing the gpu memory.
+        else:
+            main_loss = criterion(main_out, target)
+        aux_loss = criterion(aux_out, target)
+
         if not args.multiprocessing_distributed:
             main_loss, aux_loss = torch.mean(main_loss), torch.mean(aux_loss)
         loss = main_loss + args.aux_weight * aux_loss
@@ -268,7 +313,8 @@ def train(train_loader, model, optimizer, epoch):
             n = count.item()
             main_loss, aux_loss, loss = main_loss / n, aux_loss / n, loss / n
         
-        intersection, union, target = intersectionAndUnionGPU(output, target, args.classes, args.ignore_label)
+        main_out = main_out.detach().max(1)[1]
+        intersection, union, target = intersectionAndUnionGPU(main_out, target, args.classes, args.ignore_label)
         if args.multiprocessing_distributed:
             dist.all_reduce(intersection), dist.all_reduce(union), dist.all_reduce(target)
         intersection, union, target = intersection.cpu().numpy(), union.cpu().numpy(), target.cpu().numpy()
@@ -355,7 +401,7 @@ def validate(val_loader, model, criterion):
         else:
             loss = torch.mean(loss)
         
-        output = output.max(1)[1]
+        output = output.detach().max(1)[1]
         intersection, union, target = intersectionAndUnionGPU(output, target, args.classes, args.ignore_label)
         if args.multiprocessing_distributed:
             dist.all_reduce(intersection), dist.all_reduce(union), dist.all_reduce(target)

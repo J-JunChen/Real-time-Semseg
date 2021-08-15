@@ -161,7 +161,7 @@ class BiseNetHead(nn.Module):
 
 
 class BiseNet(nn.Module):
-    def __init__(self, num_classes, criterion=nn.CrossEntropyLoss(ignore_index=255)):
+    def __init__(self, num_classes):
         super(BiseNet, self).__init__()
         self.criterion = criterion
         
@@ -195,11 +195,7 @@ class BiseNet(nn.Module):
             out32 = F.interpolate(feat_out32, size=(
                 H, W), mode='bilinear', align_corners=True)
 
-            aux_loss0 = self.criterion(out16, y)
-            aux_loss1 = self.criterion(out32, y)
-            main_loss = self.criterion(out, y)
-            aux_loss = aux_loss0 + aux_loss1
-            return out.max(1)[1], main_loss, aux_loss
+            return out, out16, out32
         else:
             return out
 

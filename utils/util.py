@@ -1,4 +1,5 @@
 import os 
+import shutil
 import numpy as np
 from PIL import Image
 
@@ -160,3 +161,22 @@ def find_free_port():
     sock.close()
     # NOTE: there is still a chance the port could be taken by other processes.
     return port
+
+def save_checkpoint(state, is_best, checkpoint):
+    """Saves model and training parameters at checkpoint + 'last.pth'. If is_best==True, also saves
+    checkpoint + 'best.pth'
+
+    Args:
+        state: (dict) contains model's state_dict, may contain other keys such as epoch, optimizer state_dict
+        is_best: (bool) True if it is the best model seen till now
+        checkpoint: (string) folder where parameters are to be saved
+    """
+    filepath = os.path.join(checkpoint, 'last.pth')
+    if not os.path.exists(checkpoint):
+        print("Checkpoint Directory does not exist! Making directory {}".format(checkpoint))
+        os.mkdir(checkpoint)
+    else:
+        print("Checkpoint Directory exists! ")
+    torch.save(state, filepath)
+    if is_best:
+        shutil.copyfile(filepath, os.path.join(checkpoint, 'best.pth'))

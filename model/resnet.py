@@ -9,7 +9,7 @@ from typing import Type, Any, Callable, Union, List, Optional
 
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
-           'resnet152']
+           'resnet152', 'resnet18_v1c', 'resnet50_v1c', 'resnet101_v1c']
 
 model_urls = {
     'resnet18': 'https://download.pytorch.org/models/resnet18-5c106cde.pth',
@@ -17,6 +17,10 @@ model_urls = {
     'resnet50': 'https://download.pytorch.org/models/resnet50-19c8e357.pth',
     'resnet101': 'https://download.pytorch.org/models/resnet101-5d3b4d8f.pth',
     'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
+
+    "resnet18_v1c": "https://download.openmmlab.com/pretrain/third_party/resnet18_v1c-b5776b93.pth",
+    "resnet50_v1c": "https://download.openmmlab.com/pretrain/third_party/resnet50_v1c-2cccc1ad.pth",
+    "resnet101_v1c": "https://download.openmmlab.com/pretrain/third_party/resnet101_v1c-e67eebb6.pth",
 }
 
 # if you have download the pretrained model in your local server,
@@ -24,12 +28,14 @@ model_urls = {
 local_urls = {
     'resnet18': '/home/cjj/pretrained/resnet18-5c106cde.pth',
     'resnet34': '/home/cjj/pretrained/resnet34-333f7ec4.pth',
-    'resnet50': '/home/cjj/pretrained/resnet50-19c8e357.pth',
-    # 'resnet50': '/home/cjj/pretrained/resnet50-imagenet.pth',
+    # 'resnet50': '/home/cjj/pretrained/resnet50-19c8e357.pth',
+    'resnet50': '/home/cjj/pretrained/resnet50-imagenet.pth',
     'resnet101': '/home/cjj/pretrained/resnet101-5d3b4d8f.pth',
     'resnet152': '/home/cjj/pretrained/resnet152-b121ed2d.pth',
-}
 
+    "resnet18_v1c": "/home/cjj/pretrained/resnet18_v1c-b5776b93.pth",
+    "resnet50_v1c": "/home/cjj/pretrained/resnet50_v1c-2cccc1ad.pth",
+}
 
 def conv3x3(in_planes, out_planes, stride=1, dilation=1) -> nn.Conv2d:
     """3x3 convolution with padding"""
@@ -143,13 +149,13 @@ class ResNet(nn.Module):
                 3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False)
             self.bn1 = norm_layer(self.inplanes)
         else:
-            self.inplanes = 128
-            self.conv1 = conv3x3(3, 64, stride=2)
-            self.bn1 = norm_layer(64)
-            self.conv2 = conv3x3(64, 64)
-            self.bn2 = norm_layer(64)
-            self.conv3 = conv3x3(64, 128)
-            self.bn3 = norm_layer(128)
+            self.inplanes = 64
+            self.conv1 = conv3x3(3, 32, stride=2)
+            self.bn1 = norm_layer(32)
+            self.conv2 = conv3x3(32, 32)
+            self.bn2 = norm_layer(32)
+            self.conv3 = conv3x3(32, 64)
+            self.bn3 = norm_layer(64)
 
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
@@ -214,7 +220,7 @@ class ResNet(nn.Module):
         return x
 
 
-def resnet18(pretrained=False, **kwargs):
+def resnet18(pretrained=False, deep_base=False, **kwargs):
     model = ResNet(BasicBlock, [2, 2, 2, 2], **kwargs)
     if pretrained:
         if local_urls is None:
@@ -226,7 +232,7 @@ def resnet18(pretrained=False, **kwargs):
     return model
 
 
-def resnet34(pretrained=False, **kwargs):
+def resnet34(pretrained=False, deep_base=False, **kwargs):
     model = ResNet(BasicBlock, [3, 4, 6, 3], **kwargs)
     if pretrained:
         if local_urls is None:
@@ -271,6 +277,39 @@ def resnet152(pretrained=False, deep_base=False, **kwargs):
         else:
             model.load_state_dict(torch.load(
                 local_urls['resnet152']), strict=False)
+    return model
+
+def resnet18_v1c(pretrained=False, deep_base=True, **kwargs):
+    model = ResNet(BasicBlock, [2, 2, 2, 2], **kwargs)
+    if pretrained:
+        if local_urls is None:
+            model.load_state_dict(
+                model_zoo.load_url(model_urls['resnet18_v1c']))
+        else:
+            model.load_state_dict(torch.load(
+                local_urls['resnet18_v1c']), strict=False)
+    return model
+
+def resnet50_v1c(pretrained=False, deep_base=True, **kwargs):
+    model = ResNet(Bottleneck, [3, 4, 6, 3], deep_base=deep_base, **kwargs)
+    if pretrained:
+        if local_urls is None:
+            model.load_state_dict(
+                model_zoo.load_url(model_urls['resnet50_v1c']))
+        else:
+            model.load_state_dict(torch.load(
+                local_urls['resnet50_v1c']), strict=False)
+    return model
+
+def resnet101_v1c(pretrained=False, deep_base=True, **kwargs):
+    model = ResNet(Bottleneck, [3, 4, 23, 3], deep_base=deep_base, **kwargs)
+    if pretrained:
+        if local_urls is None:
+            model.load_state_dict(
+                model_zoo.load_url(model_urls['resnet101_v1c']))
+        else:
+            model.load_state_dict(torch.load(
+                local_urls['resnet101_v1c']), strict=False)
     return model
 
 
