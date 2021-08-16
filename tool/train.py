@@ -108,9 +108,6 @@ def main_worker(gpu, ngpus_per_node, argss):
     teacher_model = None
     if args.teacher_model_path:
         teacher_model = PSPNet(layers=args.teacher_layers, classes=args.classes, zoom_factor=args.zoom_factor)
-        print("=> loading teacher checkpoint '{}'".format(args.teacher_model_path))
-        checkpoint = torch.load(args.teacher_model_path)
-        teacher_model.load_state_dict(checkpoint['state_dict'], strict=False)
     if args.arch == 'psp':
         model = PSPNet(layers=args.layers, classes=args.classes, zoom_factor=args.zoom_factor)
         modules_ori = [model.layer0, model.layer1, model.layer2, model.layer3, model.layer4]
@@ -154,6 +151,11 @@ def main_worker(gpu, ngpus_per_node, argss):
         model = torch.nn.DataParallel(model.cuda())
         if teacher_model is not None:
             teacher_model = torch.nn.DataParallel(teacher_model.cuda())
+    
+    if teacher_model is not None:
+        checkpoint = torch.load(args.teacher_model_path, map_location=lambda storage, loc: storage.cuda())
+        teacher_model.load_state_dict(checkpoint['state_dict'], strict=False)
+        print("=> loading teacher checkpoint '{}'".format(args.teacher_model_path))
             
     if args.weight:
         if os.path.isfile(args.weight):
@@ -255,7 +257,10 @@ def main_worker(gpu, ngpus_per_node, argss):
                 is_best, 
                 args.save_path
             )
-            logger.info('Saving checkpoint to:' + args.save_path + '/train_epoch_' + str(epoch_log) + '.pth' )
+            if is_best:
+                logger.info('Saving checkpoint to:' + args.save_path + '/best.pth with mIoU: ' + str(best_mIoU_val) )
+            else:
+                logger.info('Saving checkpoint to:' + args.save_path + '/train_epoch_' + str(epoch_log) + '.pth' )
 
     if main_process():  
         writer.close() # it must close the writer, otherwise it will appear the EOFError!

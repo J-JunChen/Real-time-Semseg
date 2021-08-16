@@ -10,7 +10,7 @@ TRAIN:
   teacher_layers: 50
   teacher_model_path: exp/cityscapes/pspnet50/model/train_epoch_200.pth
   # teacher_model_path: 
-  alpha: 0.9
+  alpha: 0.5
   temperature: 20
   sync_bn: True # adopt syncbn or not
   # train_h: 713
