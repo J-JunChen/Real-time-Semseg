@@ -29,7 +29,7 @@ cv2.setNumThreads(0)
 
 def get_parser():
     parser = argparse.ArgumentParser(description='Pytorch Semantic Segmentation')
-    parser.add_argument('--config', type=str, default='config/cityscapes/cityscapes_pspnet_kd.yaml', help='config file')
+    parser.add_argument('--config', type=str, default='config/cityscapes/cityscapes_pspnet50.yaml', help='config file')
     parser.add_argument('opts', help='see config/cityscapes/cityscapes_pspnet50.yaml for all options', default=None, nargs=argparse.REMAINDER)
     args = parser.parse_args()
     assert args.config is not None
@@ -142,10 +142,11 @@ def main_worker(gpu, ngpus_per_node, argss):
         torch.cuda.set_device(gpu)
         args.batch_size = int(args.batch_size / ngpus_per_node)
         args.batch_size_val = int(args.batch_size_val / ngpus_per_node)
-        args.workers = int((args.workers + ngpus_per_node - 1) / ngpus_per_node)
-        model = torch.nn.parallel.DistributedDataParallel(model.cuda(), device_ids=[gpu], find_unused_parameters=True)
+        # args.workers = int((args.workers + ngpus_per_node - 1) / ngpus_per_node)
+        args.workers = int(args.workers / ngpus_per_node)
+        model = torch.nn.parallel.DistributedDataParallel(model.cuda(), device_ids=[gpu])
         if teacher_model is not None:
-            teacher_model = torch.nn.parallel.DistributedDataParallel(teacher_model.cuda(), device_ids=[gpu], find_unused_parameters=True)
+            teacher_model = torch.nn.parallel.DistributedDataParallel(teacher_model.cuda(), device_ids=[gpu])
 
     else:
         model = torch.nn.DataParallel(model.cuda())
@@ -387,46 +388,47 @@ def validate(val_loader, model, criterion):
 
     model.eval()
     end = time.time()
-    for i, (input, target) in enumerate(val_loader):
-        data_time.update(time.time() - end)
-        input = input.cuda(non_blocking=True)
-        target = target.cuda(non_blocking=True)
-        output = model(input)
-        if args.zoom_factor != 8:
-            output = F.interpolate(output, size=target.size()[1:], mode='bilinear', align_corners=True)
-        loss = criterion(output, target)
+    with torch.no_grad():
+        for i, (input, target) in enumerate(val_loader):
+            data_time.update(time.time() - end)
+            input = input.cuda(non_blocking=True)
+            target = target.cuda(non_blocking=True)
+            output = model(input)
+            if args.zoom_factor != 8:
+                output = F.interpolate(output, size=target.size()[1:], mode='bilinear', align_corners=True)
+            loss = criterion(output, target)
 
-        n = input.size(0)
-        if args.multiprocessing_distributed:
-            loss = loss * n # not considering ignore pixels
-            count = target.new_tensor([n], dtype=torch.long)
-            dist.all_reduce(loss), dist.all_reduce(count)
-            n = count.item()
-            loss = loss / n
-        else:
-            loss = torch.mean(loss)
-        
-        output = output.detach().max(1)[1]
-        intersection, union, target = intersectionAndUnionGPU(output, target, args.classes, args.ignore_label)
-        if args.multiprocessing_distributed:
-            dist.all_reduce(intersection), dist.all_reduce(union), dist.all_reduce(target)
-        intersection, union, target = intersection.cpu().numpy(), union.cpu().numpy(), target.cpu().numpy()
-        intersection_meter.update(intersection), union_meter.update(union), target_meter.update(target)
+            n = input.size(0)
+            if args.multiprocessing_distributed:
+                loss = loss * n # not considering ignore pixels
+                count = target.new_tensor([n], dtype=torch.long)
+                dist.all_reduce(loss), dist.all_reduce(count)
+                n = count.item()
+                loss = loss / n
+            else:
+                loss = torch.mean(loss)
+            
+            output = output.detach().max(1)[1]
+            intersection, union, target = intersectionAndUnionGPU(output, target, args.classes, args.ignore_label)
+            if args.multiprocessing_distributed:
+                dist.all_reduce(intersection), dist.all_reduce(union), dist.all_reduce(target)
+            intersection, union, target = intersection.cpu().numpy(), union.cpu().numpy(), target.cpu().numpy()
+            intersection_meter.update(intersection), union_meter.update(union), target_meter.update(target)
 
-        accuracy = sum(intersection_meter.val) / (sum(target_meter.val) + 1e-10)
-        loss_meter.update(loss.item(), input.size(0))
-        batch_time.update(time.time() - end)
-        end = time.time()
-        if ((i + 1) % args.print_freq == 0) and main_process():
-            logger.info('Test: [{}/{}] '
-                        'Data {data_time.val:.3f} ({data_time.avg:.3f}) '
-                        'Batch {batch_time.val:.3f} ({batch_time.avg:.3f}) '
-                        'Loss {loss_meter.val:.4f} ({loss_meter.avg:.4f}) '
-                        'Accuracy {accuracy:.4f}.'.format(i + 1, len(val_loader),
-                                                        data_time=data_time,
-                                                        batch_time=batch_time,
-                                                        loss_meter=loss_meter,
-                                                        accuracy=accuracy))
+            accuracy = sum(intersection_meter.val) / (sum(target_meter.val) + 1e-10)
+            loss_meter.update(loss.item(), input.size(0))
+            batch_time.update(time.time() - end)
+            end = time.time()
+            if ((i + 1) % args.print_freq == 0) and main_process():
+                logger.info('Test: [{}/{}] '
+                            'Data {data_time.val:.3f} ({data_time.avg:.3f}) '
+                            'Batch {batch_time.val:.3f} ({batch_time.avg:.3f}) '
+                            'Loss {loss_meter.val:.4f} ({loss_meter.avg:.4f}) '
+                            'Accuracy {accuracy:.4f}.'.format(i + 1, len(val_loader),
+                                                            data_time=data_time,
+                                                            batch_time=batch_time,
+                                                            loss_meter=loss_meter,
+                                                            accuracy=accuracy))
     
     iou_class = intersection_meter.sum / (union_meter.sum + 1e-10)
     accuracy_class = intersection_meter.sum / (target_meter.sum + 1e-10)

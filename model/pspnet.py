@@ -25,8 +25,7 @@ class PPM(nn.Module):
         x_size = x.size()
         out = [x]
         for f in self.features:
-            out.append(F.interpolate(
-                f(x), x_size[2:], mode='bilinear', align_corners=True))
+            out.append(F.interpolate(f(x), x_size[2:], mode='bilinear', align_corners=True))
         return torch.cat(out, 1)
 
 
@@ -41,13 +40,13 @@ class PSPNet(nn.Module):
         self.use_ppm = use_ppm
 
         if layers == 18:
-            resnet = models.resnet18(pretrained=True, deep_base=False)
+            resnet = models.resnet18(pretrained=True, deep_base=False, strides=(1, 2, 2, 2), dilations=(1, 1, 1, 1))
+        elif layers == 34:
+            resnet = models.resnet34(pretrained=True, deep_base=False, strides=(1, 2, 2, 2), dilations=(1, 1, 1, 1))
         elif layers == 50:
-            resnet = models.resnet50_v1c(pretrained=True, deep_base=True)
+            resnet = models.resnet50_semseg(pretrained=True, deep_base=True, strides=(1, 2, 1, 1), dilations=(1, 1, 2, 4))
         elif layers == 101:
-            resnet = models.resnet101(pretrained=True, deep_base=True)
-        else:
-            resnet = models.resnet152(pretrained=True, deep_base=True)
+            resnet = models.resnet101_semseg(pretrained=True, deep_base=True, strides=(1, 2, 1, 1), dilations=(1, 1, 2, 4))
 
         if layers == 18 or layers == 34:
             self.layer0 = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu, resnet.maxpool)
@@ -55,30 +54,7 @@ class PSPNet(nn.Module):
             self.layer0 = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu, resnet.conv2,
                                         resnet.bn2, resnet.relu, resnet.conv3, resnet.bn3, resnet.relu, resnet.maxpool)
         self.layer1, self.layer2, self.layer3, self.layer4 = resnet.layer1, resnet.layer2, resnet.layer3, resnet.layer4
-
-        if layers == 18 or layers == 34:
-            for n, m in self.layer3.named_modules():
-                if 'conv1' in n:
-                    m.dilation, m.padding, m.stride = (2, 2), (2, 2), (1, 1)
-                elif 'downsample.0' in n:
-                    m.stride = (1, 1)
-            for n, m in self.layer4.named_modules():
-                if 'conv1' in n:
-                    m.dilation, m.padding, m.stride = (4, 4), (4, 4), (1, 1)
-                elif 'downsample.0' in n:
-                    m.stride = (1, 1)
-        else:
-            for n, m in self.layer3.named_modules():
-                if 'conv2' in n:
-                    m.dilation, m.padding, m.stride = (2, 2), (2, 2), (1, 1)
-                elif 'downsample.0' in n:
-                    m.stride = (1, 1)
-            for n, m in self.layer4.named_modules():
-                if 'conv2' in n:
-                    m.dilation, m.padding, m.stride = (4, 4), (4, 4), (1, 1)
-                elif 'downsample.0' in n:
-                    m.stride = (1, 1)
-
+        
         if layers == 18 or layers == 34:
             fea_dim = 512
             aux_dim = 256
@@ -136,9 +112,9 @@ class PSPNet(nn.Module):
 
 if __name__ == "__main__":
     import os
-    os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1'
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
     input = torch.rand(4, 3, 225, 225).cuda()
-    model = PSPNet(layers=50, bins=(1, 2, 3, 6), dropout=0.1, classes=21, zoom_factor=8, use_ppm=True, pretrained=True).cuda()
+    model = PSPNet(layers=50, bins=(1, 2, 3, 6), dropout=0.1, classes=21, zoom_factor=8, use_ppm=True).cuda()
     model.eval()
     print(model)
     output = model(input)

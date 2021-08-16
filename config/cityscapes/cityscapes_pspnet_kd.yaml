@@ -8,15 +8,15 @@ TRAIN:
   arch: psp
   layers: 18
   teacher_layers: 50
-  teacher_model_path: exp/cityscapes/pspnet50/model/train_epoch_200.pth
+  teacher_model_path: exp/cityscapes/pspnet50/model/best.pth
   # teacher_model_path: 
   alpha: 0.5
   temperature: 20
   sync_bn: True # adopt syncbn or not
-  # train_h: 713
-  # train_w: 713
-  train_h: 473
-  train_w: 473
+  train_h: 769
+  train_w: 769
+  # train_h: 473
+  # train_w: 473
   scale_min: 0.5
   scale_max: 2.0
   rotate_min: -10
@@ -24,8 +24,8 @@ TRAIN:
   zoom_factor: 8  # input size zoom_factor
   ignore_label: 255
   aux_weight: 0.4
-  train_gpu: [0]
-  workers: 4  # data loader workers
+  train_gpu: [0, 1, 2, 3]
+  workers: 16  # data loader workers
   batch_size: 8
   batch_size_val: 4 # batch size for validation during training, memory and speed tradeoff
   base_lr: 0.01
@@ -52,14 +52,14 @@ TEST:
   test_list: dataset/cityscapes/list/fine_val.txt
   split: val  # split in [train, val and test]
   base_size: 2048  # based size for scaling
-  test_h: 713
-  test_w: 713
+  test_h: 769
+  test_w: 769
   scales: [1.0]  # evaluation scales, ms as [0.5, 0.75, 1.0, 1.25, 1.5, 1.75]
   has_prediction: False  # has prediction already or not
   index_start: 0  # evaluation start index in list
   index_step: 0  # evaluation step index in list, 0 means to end
   test_gpu: [0]
-  model_path: exp/cityscapes/pspnet_kd/model/train_epoch_200.pth  # evaluation model path
+  model_path: exp/cityscapes/pspnet_kd/model/best.pth  # evaluation model path
   save_folder: exp/cityscapes/pspnet_kd/result/epoch_200/val/ss  # results save folder
   colors_path: data/cityscapes/cityscapes_colors.txt  # path of dataset colors
   names_path: data/cityscapes/cityscapes_names.txt  # path of dataset category names

@@ -2,3 +2,4 @@
 exp/cityscapes
 __pycache__/
 dataset/
+nohup.out
