@@ -10,3 +10,4 @@ results.zip
 visualizing/events*
 model/vit
 .vscode
+notebook/.ipynb_checkpoints
