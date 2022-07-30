@@ -163,7 +163,7 @@ def find_free_port():
     return port
 
 def save_checkpoint(state, is_best, checkpoint):
-    """Saves model and training parameters at checkpoint + 'last.pth'. If is_best==True, also saves
+    """Saves model and training parameters at checkpoint + 'iter_numbers.pth'. If is_best==True, also saves
     checkpoint + 'best.pth'
 
     Args:
@@ -171,6 +171,7 @@ def save_checkpoint(state, is_best, checkpoint):
         is_best: (bool) True if it is the best model seen till now
         checkpoint: (string) folder where parameters are to be saved
     """
+    # filepath = os.path.join(checkpoint, 'iter_'+ str(iteration) +'.pth')
     filepath = os.path.join(checkpoint, 'last.pth')
     if not os.path.exists(checkpoint):
         print("Checkpoint Directory does not exist! Making directory {}".format(checkpoint))
@@ -178,5 +179,6 @@ def save_checkpoint(state, is_best, checkpoint):
     else:
         print("Checkpoint Directory exists! ")
     torch.save(state, filepath)
+    # shutil.copyfile(filepath, os.path.join(checkpoint, 'last.pth'))
     if is_best:
         shutil.copyfile(filepath, os.path.join(checkpoint, 'best.pth'))

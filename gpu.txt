@@ -1,0 +1,50 @@
+Batch size: 8 x (769x769)
+kd: 101->18 (6012MB per gpu) 2 x Nivdia 2080Ti, mIoU: 0.6814-0.7004
+kd: 50->18 (5712MB per gpu) 2 x Nivdia 2080Ti, mIoU: 0.6789-0.6965
+psp18: (3883MB per gpu) 2 x Nivdia 2080Ti, mIoU: 0.6683
+psp50: (8532MB per gpu) 4 x Nivdia 2080Ti, mIoU: 0.7606
+psp50_769x769: (8863MB per gpu) 4 x Nivdia 2080Ti, mIoU: 
+
+
+Batch size: 16 x (1025x1025)
+bisenet18: (w/o sp) (6272MB per gpu) 4 x Nivdia 2080Ti, mIoU: 0.7429
+bisenet18: (w/o sp + ohem_loss) (6456MB per gpu) 4 x Nivdia 2080Ti, --
+bisenet18: (w/sp) (7030MB per gpu) 4 x Nivdia 2080Ti, mIoU: 0.7401
+bisenet18: (w/sp + ohem_loss) (7208MB per gpu) 4 x Nivdia 2080Ti, mIoU: 0.7497
+
+fanet18: (ohem_loss) (7482MB  per gpu) 4 x Nivdia 2080Ti, mIoU: 0.7744
+fftnet18: (8675MB  per gpu) 4 x Nivdia 2080Ti, mIoU: 
+
+dctnet1: (only dct)(4919MB per gpu) 4 x Nivdia 2080Ti 
+dctnet2: (dct + bise)(5917MB per gpu) 4 x Nivdia 2080Ti
+dctnet3: (dct + u-net)(5741MB per gpu) 4 x Nivdia 2080Ti
+dctnet4: (feat32 + dct)(5165MB per gpu) 4 x Nivdia 2080Ti
+dctnet4(resnet50): (feat32 + dct)(8257MB per gpu) 4 x Nivdia 2080Ti, mIoU: 0.7473
+resnet50: (feat32 up)(8093MB per gpu) 4 x Nivdia 2080Ti, mIoU: 0.7386
+resnet18: (feat32 up)(5119MB per gpu) 4 x Nivdia 2080Ti, mIoU: 0.6540
+
+resnet18 (feat32 up) (8837MB per gpu) 2 x Nivdia 2080Ti, mIoU: 0.6240~0.6773 (from scratch)
+dctnet4 (resnet18): (feat32 + dct)(5165MB per gpu) 4 x Nivdia 2080Ti, mIoU: 0.6547
+dctnet5 (opencv-dct) (4709MB per gpu) 2 x Nivdia 2080Ti, mIoU: 0.4474~0.5570 (from scratch)
+dctnet5 (TransAllQuant) (4695MB per gpu) 2 x Nivdia 2080Ti, mIoU: 0.4853~0.5817 (from scratch)
+dctnet5 (TransAllQuant + w/o normalize) (4695MB per gpu) 2 x Nivdia 2080Ti, mIoU: 0.5104~0.5724 (from scratch)
+dctnet5 (w/o dilation + 16x16 block) (4459MB per gpu) 2 x Nivdia 2080Ti, mIoU: 0.3473~0.4441 (from scratch)
+dctnet5 (w/ dilation) (5833MB per gpu) 2 x Nivdia 2080Ti, mIoU: 0.528~0.599 (from scratch)
+dctnet6 (scipy-dct) (5290MB per gpu) 2 x Nivdia 2080Ti, mIoU: 0.4655~0.5588(best) (from scratch)
+dctnet7 (dct's shape same rgb'shape) (7659MB per gpu) 2 x Nivdia 2080Ti
+dctnet8 (dct_345 + rgb) (7649MB per gpu) 2 x Nivdia 2080Ti, mIoU: 0.5513~0.6117 (from scratch)
+dctnet8 (dct_2345 + rgb) (7967MB per gpu) 2 x Nivdia 2080Ti, mIoU: 0.5719~0.6323 (from scratch)
+dctnet8 (dct_2345(50) + rgb) (8407MB per gpu) 4 x Nivdia 2080Ti, mIoU: 0.5973~0.6433 (from scratch)
+
+--------------
+Batch size: 8 x (713x713)
+nonlocal50 (9894MB per gpu) 4 x Nivdia 2080Ti, mIoU: 0.7226
+danet50 (10682MB per gpu) 4 x Nivdia 2080Ti, --
+
+sanet50 (9994MB per gpu) 4 x Nivdia 2080Ti (with dilation), mIoU: 0.7612
+sanet18 (2012MB per gpu) 4 x Nivdia 2080Ti (no dilation), mIoU: 0.7042
+sanet18 (5396MB per gpu) 4 x Nivdia 2080Ti (with dilation), mIoU: 0.7345 
+sanet_kd (6566MB per gpu) 2 x Nivdia 2080Ti (no dilation) 
+sanet_kd (6456MB per gpu) 4 x Nivdia 2080Ti (with dilation), mIoU: 0.7027-0.7298
+sanet_kd_sa (7962MB per gpu) 4 x Nivdia 2080Ti (with dilation), mIoU: 0.7393
+sanet_kd_sa (MB per gpu) 4 x Nivdia 2080Ti (no dilation)， mIoU: 0.7060

@@ -4,6 +4,8 @@ import numpy as np
 import numbers
 import collections
 import cv2
+from scipy import fftpack
+
 
 import torch
 
@@ -39,24 +41,7 @@ class ToTensor(object):
             label = label.long()
         return image, label
 
-# class Normalize(object):
-#     # Normalize tensor with mean and standard deviation along channel: channel = (channel - mean) / std
-#     def __int__(self, mean, std=None):
-#         if std is None:
-#             assert len(mean) > 0
-#         else:
-#             assert len(mean) == len(std)
-#         self.mean = mean
-#         self.std = std
 
-#     def __call__(self, image, label):
-#         if self.std is None:
-#             for t, m in zip(image, self.mean):
-#                 t.sub_(m)
-#         else:
-#             for t, m in zip(image, self.mean, self.std):
-#                 t.sub_(m).div_(s)
-#         return image, label
 class Normalize(object):
     # Normalize tensor with mean and standard deviation along channel: channel = (channel - mean) / std
     def __init__(self, mean, std=None):
@@ -102,7 +87,7 @@ class RandScale(object):
         if aspect_ratio is None:
             self.aspect_ratio = aspect_ratio
         elif isinstance(aspect_ratio, collections.Iterable) and len(aspect_ratio) == 2 \
-                and isinstance(aspect_ratio[0], number.Number) and isinstance(aspect_ratio[1], numbers.Number) \
+                and isinstance(aspect_ratio[0], numbers.Number) and isinstance(aspect_ratio[1], numbers.Number) \
                 and 0 < aspect_ratio[0] < aspect_ratio[1]:
             self.aspect_ratio = aspect_ratio
         else:
@@ -120,65 +105,6 @@ class RandScale(object):
         label = cv2.resize(label, None, fx=scale_factor_x, fy=scale_factor_y, interpolation=cv2.INTER_NEAREST)
         return image, label
 
-
-class Crop(object):
-    """ Crops the given ndarray image (H*W*C or H*W).
-    Args:
-        size (sequence or int): Desired output size of the crop. If size is an 
-        int instead of sequence like (h, w), a square crop (size, size) is made.
-    """
-    def __int__(self, size, crop_type='center', padding=None, ignore_label=255):
-        if isinstance(size, int):
-            self.crop_h = size
-            self.crop_w = size 
-        elif isinstance(size, collections.Iterable) and len(size) == 2 \
-                and isinstance(size[0], int) and isinstance(size[1], int) \
-                and size[0] > 0 and size[1] > 0:
-            self.crop_h = size[0]
-            self.crop_w = size[1]
-        else:
-            raise (RuntimeError("crop size error. \n"))   
-        if crop_type == 'center' or crop_type == 'rand':
-            self.crop_type = crop_type
-        else:
-            raise(RuntimeError("crop type error: rand | center\n"))
-        if padding is None: 
-            self.padding = padding
-        elif isinstance(padding, list):
-            if all(isinstance(i, numbers.Number) for i in padding):
-                self.padding = padding
-            else:
-                raise (RuntimeError("padding in Crop() should be a number list\n"))
-            if len(padding) != 3:
-                raise (RuntimeError("padding channel is not equal with 3\n"))
-        else:
-            raise (RuntimeError("padding in Crop() should be a number list\n"))
-        if isinstance(ignore_label, int):
-            self.ignore_label = ignore_label
-        else:
-            raise (RuntimeError("ignore_label should be an integer number\n"))
-        
-    def __call__(self, image, label):
-        h, w = label.shape
-        pad_h = max(self.crop_h - h, 0)
-        pad_w = max(self.crop_w - w, 0)
-        pad_h_half = int(pad_h / 2)
-        pad_w_half = int(pad_w / 2)
-        if pad_h > 0 or pad_w > 0:
-            if self.padding is None:
-                raise (RuntimeError("segtransform.Crop() need padding while padding argument is None\n"))
-            image = cv2.copyMakeBorder(image, pad_h_half, pad_h - pad_h_half, pad_w_half, pad_w - pad_w_half, cv2.BORDER_CONSTANT, value=self.padding)
-            label = cv2.copyMakeBorder(label, pad_h_half, pad_h - pad_h_half, pad_w_half, pad_w - pad_w_half, cv2.BORDER_CONSTANT, value=self.ignore_label)
-        h, w = label.shape
-        if self.crop_type == 'rand':
-            h_off = random.randint(0, h - self.crop_h)
-            w_off = random.randint(0, w - self.crop_w)
-        else:
-            h_off = int((h - self.crop_h) / 2)
-            w_off = int((w - self.crop_w) / 2)
-        image = image[h_off:h_off+self.crop_h, w_off:w_off+self.crop_w]
-        label = label[h_off:h_off+self.crop_h, w_off:w_off+self.crop_w]
-        return image, label
 
 class Crop(object):
     """Crops the given ndarray image (H*W*C or H*W).
@@ -240,7 +166,6 @@ class Crop(object):
         return image, label
 
 
-
 class RandRotate(object):
     # Randomly rotate image & label with rotate factor in [rotate_min, rotate_max]
     def __init__(self, rotate, padding, ignore_label=255, p=0.5):
@@ -298,25 +223,253 @@ class RandomGaussianBlur(object):
     def __call__(self, image, label):
         if random.random() < 0.5:
             image = cv2.GaussianBlur(image, (self.radius, self.radius), 0)
-        return image, label
-    
+        return image, label   
+
 
 class RGB2BGR(object):
     def __call__(self, image, label):
         image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         return image, label
 
+
 class BGR2RGB(object):
     def __call__(self, image, label):
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        return image, label
+        return image, label   
+
+
+class GetDctCoefficient(object):
+    def __init__(self, 
+                 block_size=8, 
+                 sub_sampling='4:2:0', 
+                 quality_factor=99, 
+                 threshold=0.0):
+        self.block_size = block_size
+        self.sub_sampling = sub_sampling
+        self.quality_factor = quality_factor
+        self.thresh = threshold
+        # the quantisation matrices for the luminace channel (QY)
+        self.QY=np.array([[16,11,10,16,24,40,51,61],
+                                [12,12,14,19,26,48,60,55],
+                                [14,13,16,24,40,57,69,56],
+                                [14,17,22,29,51,87,80,62],
+                                [18,22,37,56,68,109,103,77],
+                                [24,35,55,64,81,104,113,92],
+                                [49,64,78,87,103,121,120,101],
+                                [72,92,95,98,112,100,103,99]])
+        # the quantisation matrices for the chrominance channels (QC)
+        self.QC=np.array([[17,18,24,47,99,99,99,99],
+                                [18,21,26,66,99,99,99,99],
+                                [24,26,56,99,99,99,99,99],
+                                [47,66,99,99,99,99,99,99],
+                                [99,99,99,99,99,99,99,99],
+                                [99,99,99,99,99,99,99,99],
+                                [99,99,99,99,99,99,99,99],
+                                [99,99,99,99,99,99,99,99]])
+
+    def __call__(self, image, label):
+        # 1. Ensure the size of image and label satisfy the factor of 8.
+        image = self.block_cropping(image, self.block_size)
+        label = self.block_cropping(label, self.block_size)
+        # 2. The chrominance channels Cr and Cb are subsampled
+        if self.sub_sampling == '4:2:0':
+            imSub = self.subsample_chrominance(image, 2, 2)
+        # 3. Get the quatisation matrices, which will be applied to the DCT coefficients
+        Q = self.quality_factorize(self.QY, self.QC, self.quality_factor)
+        # 4. Apply DCT algorithm for orignal image
+        TransAll, TransAllThresh ,TransAllQuant = self.dct_encoder(imSub, Q, self.block_size, self.thresh)
+        # 5. Split the same frequency in each 8x8 blocks to the same channel
+        dct_list = self.split_frequency(TransAllQuant, self.block_size)
+        # 6. upsample the Cr & Cb channel to concatenate with Y channel
+        dct_coefficients = self.upsample(dct_list)
+        return dct_coefficients, label
     
+    def block_cropping(self, image, blocksize=8):
+        B = blocksize
+        # print('orginal image shape:', image.shape)
+        h, w = (np.array(image.shape[:2]) // B * B).astype(int)
+        image = image[:h, :w]
+        # print('modified image shape:', image.shape)
+        return image
+    
+    def subsample_chrominance(self, YCbCr_image, SSV=2, SSH=2):
+        crf = cv2.boxFilter(YCbCr_image[:,:,1], ddepth=-1, ksize=(2,2))
+        cbf = cv2.boxFilter(YCbCr_image[:,:,2], ddepth=-1, ksize=(2,2))
+        crsub = crf[::SSV, ::SSH] # sample with stride SSV in row and stride SSH in col.
+        cbsub = cbf[::SSV, ::SSH]
+        imSub_list = [YCbCr_image[:, :, 0], crsub, cbsub]
+        return imSub_list
 
-
-
-
-
-
+    def quality_factorize(self, qy, qc, QF=99):
+        if QF < 50 and QF > 1:
+            scale = np.floor(5000/QF)
+        elif QF < 100:
+            scale = 200-2*QF
+        else:
+            print("Quality Factor must be in the range [1..99]")
+        scale = scale / 100.0
+        # print("Q factor:{}, Q scale:{} ".format(QF, scale))
+        q = [qy*scale, qc*scale, qc*scale]
+        return q
+    
+    # def dct_encoder(self, imSub_list, Q, blocksize=8, thresh=0.05):
+    #     TransAll_list = []
+    #     TransAllThresh_list = []
+    #     TransAllQuant_list = []
+    #     B = blocksize
+    #     for idx, channel in enumerate(imSub_list):
+    #         channelrows = channel.shape[0]
+    #         channelcols = channel.shape[1]
+    #         Trans = np.zeros((channelrows, channelcols), np.float32)
+    #         TransThresh = np.zeros((channelrows, channelcols), np.float32)
+    #         TransQuant = np.zeros((channelrows, channelcols), np.float32)
+    #         blocksV = int(channelrows / B)
+    #         blocksH = int(channelcols / B)
+    #         vis0 = np.zeros((channelrows,channelcols), np.float32)
+    #         vis0[:channelrows, :channelcols] = channel
+    #         vis0 = vis0-128 # before DCT the pixel values of all channels are shifted by -128
+    #         for row in range(blocksV):
+    #             for col in range(blocksH):
+    #                 currentblock = cv2.dct(vis0[row*B:(row+1)*B, col*B:(col+1)*B])
+    #                 Trans[row*B:(row+1)*B, col*B:(col+1)*B] = currentblock
+    #                 thres_block = TransThresh[row*B:(row+1)*B, col*B:(col+1)*B] = \
+    #                     currentblock * (abs(currentblock) > thresh * np.max(currentblock))
+    #                 TransQuant[row*B:(row+1)*B, col*B:(col+1)*B] = np.round(thres_block / Q[idx])
+    #         TransAll_list.append(Trans)
+    #         TransAllThresh_list.append(TransThresh)
+    #         TransAllQuant_list.append(TransQuant)
+    #         # print('If TransAll_List is the same as TransAllTresh_List? ', np.allclose(TransAll_list, TransAllThresh_list))
+    #     return TransAll_list, TransAllThresh_list ,TransAllQuant_list
+    
+    def dct_encoder(self, imSub_list, Q, blocksize=8, thresh=0.05):
+        TransAll_list = []
+        TransAllThresh_list = []
+        TransAllQuant_list = []
+        B = blocksize
+        for idx,channel in enumerate(imSub_list):
+            channelrows=channel.shape[0]
+            channelcols=channel.shape[1]
+            vis0 = np.zeros((channelrows,channelcols), np.float32)
+            vis0[:channelrows, :channelcols] = channel
+            vis0=vis0-128 # before DCT the pixel values of all channels are shifted by -128
+            blocks = self.blockshaped(vis0, B, B)
+            # dct_blocks = fftpack.dct(fftpack.dct(blocks, axis=1, norm='ortho'), axis=2, norm='ortho')
+            dct_blocks = fftpack.dctn(blocks, axes=(-2,-1), norm='ortho')
+            thres_blocks = dct_blocks * \
+                (abs(dct_blocks) > thresh * np.amax(dct_blocks, axis=(1,2))[:, np.newaxis, np.newaxis]) # need to broadcast
+            # quant_blocks = np.round(thres_blocks / Q[idx])
+            quant_blocks = np.round(thres_blocks)
         
+            TransAll_list.append(self.unblockshaped(dct_blocks, channelrows, channelcols))
+            TransAllThresh_list.append(self.unblockshaped(thres_blocks, channelrows, channelcols))
+            TransAllQuant_list.append(self.unblockshaped(quant_blocks, channelrows, channelcols))
+        return TransAll_list, TransAllThresh_list ,TransAllQuant_list
+        
+    # def idct_decoder(self, TransAllQuant_list, Q, blocksize=8):
+    #     h, w = TransAllQuant_list[0].shape
+    #     B = blocksize
+    #     DecAll = np.zeros((h, w, 3), np.uint8)
+    #     for idx, channel in enumerate(TransAllQuant_list):
+    #         channelrows = channel.shape[0]
+    #         channelcols = channel.shape[1]
+    #         blocksV = int(channelrows / B)
+    #         blocksH = int(channelcols / B)
+    #         back0 = np.zeros((channelrows, channelcols), np.uint8)
+    #         for row in range(blocksV):
+    #             for col in range(blocksH):
+    #                 dequantblock = channel[row*B:(row+1)*B, col*B:(col+1)*B] * Q[idx]
+    #                 currentblock = np.round(cv2.idct(dequantblock)) + 128 # inverse shiftign of the shift of the pixel values, sucht that their value range is [0,...,255].
+    #                 currentblock[currentblock > 255] = 255
+    #                 currentblock[currentblock < 0] = 0
+    #                 back0[row*B:(row+1)*B, col*B:(col+1)*B] = currentblock
+    #         back1 = cv2.resize(back0, (w, h)) # the subsampled chrominance channels are interpolated, using cv2.INTER_LINEAR in default. 
+    #         DecAll[:, :, idx] = np.round(back1)
+    #     return DecAll
+    
+    def idct_decoder(self, TransAllQuant_list, Q, blocksize=8):
+        h, w = TransAllQuant_list[0].shape
+        c = len(TransAllQuant_list)
+        B = blocksize
+        DecAll=np.zeros((h,w,c), np.uint8)
+        for idx, channel in enumerate(TransAllQuant_list):
+            channelrows=channel.shape[0]
+            channelcols=channel.shape[1]
+            blocks = self.blockshaped(channel, blocksize, blocksize)
+            dequantblocks = blocks * Q[idx]
+            idct_blocks = fftpack.idctn(dequantblocks, axes= (-2,-1), norm='ortho')
+            idct_blocks = np.round(idct_blocks)+128 # inverse shiftign of the shift of the pixel values, sucht that their value range is [0,...,255].
+            idct_blocks[idct_blocks>255]=255
+            idct_blocks[idct_blocks<0]=0
+            idct_arr = self.unblockshaped(idct_blocks, channelrows, channelcols).astype(np.uint8)
+            if idx != 0:
+                idct_arr=cv2.resize(idct_arr,(w,h)) # the subsampled chrominance channels are interpolated, using cv2.INTER_LINEAR in default. 
+            DecAll[:,:,idx]=np.round(idct_arr)
+        return DecAll
+    
+    # def split_frequency(self, Trans_list, blocksize=8):
+    #     DctBlock_list = []
+    #     B = blocksize
+    #     for idx, channel in enumerate(Trans_list):
+    #         channelrows = channel.shape[0]
+    #         channelcols = channel.shape[1]
+    #         blocksV = int(channelrows / B)
+    #         blocksH = int(channelcols / B)
+    #         DCT_block = np.zeros((blocksV, blocksH, B*B), np.float32)
+    #         for row in range(blocksV):
+    #             for col in range(blocksH):
+    #                 currentblock = channel[row*B:(row+1)*B, col*B:(col+1)*B]
+    #                 DCT_block[row, col] = currentblock.reshape(B*B)
+    #         DctBlock_list.append(DCT_block)
+    #     return DctBlock_list
 
+    def split_frequency(self, Trans_list, blocksize=8):
+        DctBlock_list = []
+        B = blocksize
+        for idx, channel in enumerate(Trans_list):
+            channelrows = channel.shape[0]
+            channelcols = channel.shape[1]
+            blocksV = int(channelrows / B)
+            blocksH = int(channelcols / B)  
+            dct_blocks = self.blockshaped(channel, B, B)
+            DctBlock_list.append(dct_blocks.reshape(blocksV, blocksH, B*B))        
+        return DctBlock_list
+    
+    def upsample(self, DctBlock_list):
+        h, w, c = DctBlock_list[0].shape
+        DctUpAll = np.zeros((h, w, 3*c), np.float32)
+        for idx, channel in enumerate(DctBlock_list):
+            if idx == 0:
+                DctUpAll[:, :, idx*c:(idx+1)*c] = channel
+            else: 
+                dct_block = cv2.resize(channel, (w,h))
+                DctUpAll[:, :, idx*c:(idx+1)*c] = dct_block
+        return DctUpAll
+
+    def blockshaped(self, arr, nrows, ncols):
+        """
+        Return an array of shape (n, nrows, ncols) where
+        n * nrows * ncols = arr.size
+
+        If arr is a 2D array, the returned array should look like n subblocks with
+        each subblock preserving the "physical" layout of arr.
+        """
+        h, w = arr.shape
+        assert h % nrows == 0, f"{h} rows is not evenly divisible by {nrows}"
+        assert w % ncols == 0, f"{w} cols is not evenly divisible by {ncols}"
+        return (arr.reshape(h//nrows, nrows, -1, ncols)
+                .swapaxes(1,2)
+                .reshape(-1, nrows, ncols))
+
+    def unblockshaped(self, arr, h, w):
+        """
+        Return an array of shape (h, w) where
+        h * w = arr.size
+
+        If arr is of shape (n, nrows, ncols), n sublocks of shape (nrows, ncols),
+        then the returned array preserves the "physical" layout of the sublocks.
+        """
+        n, nrows, ncols = arr.shape
+        return (arr.reshape(h//nrows, -1, nrows, ncols)
+                .swapaxes(1,2)
+                .reshape(h, w))
 

@@ -1,11 +1,12 @@
 # paper title: BisNet: Bilateral segmentation network for real-time semantic segmentation
 # paper link: https://openaccess.thecvf.com/content_ECCV_2018/html/Changqian_Yu_BisNet_Bilateral_Segmentation_ECCV_2018_paper.html
+# reference code: https://github.com/CoinCheung/BiSeNet
 
 import torch
 from torch import nn
 import torch.nn.functional as F
 
-from model.resnet import resnet18, resnet50, resnet101
+import model.resnet as models
 
 
 class ConvBNReLU(nn.Module):
@@ -89,11 +90,11 @@ class SpatialPath(nn.Module):
 
 
 class ContextPath(nn.Module):
-    def __init__(self, in_channels, out_channels, backbone=resnet18):
+    def __init__(self, in_channels, out_channels, backbone):
         super(ContextPath, self).__init__()
         inner_channels = 128
         # follow the original paper of ResNet, when deep_base is False.
-        self.backbone = backbone(pretrained=True, deep_base=False)
+        self.backbone = backbone
         self.arm16 = AttentionRefinementModule(256, inner_channels)
         self.arm32 = AttentionRefinementModule(512, inner_channels)
 
@@ -104,7 +105,7 @@ class ContextPath(nn.Module):
             self.backbone.relu,
             self.backbone.maxpool
         )
-        # stage channels for resnet18 and resnet50 are:(64, 128, 256, 512)
+        # stage channels for resnet18 and resnet34 are:(64, 128, 256, 512)
         self.layer1, self.layer2, self.layer3, self.layer4 \
             = self.backbone.layer1, self.backbone.layer2, self.backbone.layer3, self.backbone.layer4
         self.gap = nn.AdaptiveAvgPool2d(1)  # Global Average Pooling
@@ -143,16 +144,16 @@ class ContextPath(nn.Module):
             H8, W8), mode='bilinear', align_corners=True)
         feat16_up = self.conv_head16(feat16_up)
 
-        return feat16_up, feat32_up  # x8, x16
+        return feat_8, feat16_up, feat32_up  # x8, x8, x16
 
 
 class BiseNetHead(nn.Module):
-    def __init__(self, in_channels, mid_channels, num_classes):
+    def __init__(self, in_channels, mid_channels, classes):
         super(BiseNetHead, self).__init__()
         self.conv3x3_bn_relu = ConvBNReLU(in_channels=in_channels, out_channels=mid_channels,
                                           ks=3, stride=1, padding=1)
         self.conv1x1 = nn.Conv2d(
-            in_channels=mid_channels, out_channels=num_classes, kernel_size=1, stride=1, padding=1)
+            in_channels=mid_channels, out_channels=classes, kernel_size=1, stride=1, padding=1)
 
     def forward(self, x):
         x = self.conv3x3_bn_relu(x)
@@ -161,24 +162,33 @@ class BiseNetHead(nn.Module):
 
 
 class BiseNet(nn.Module):
-    def __init__(self, num_classes):
+    def __init__(self, layers=18, classes=2, with_sp=True):
         super(BiseNet, self).__init__()
-        self.criterion = criterion
+        self.with_sp = with_sp
+
+        if layers == 18:
+            resnet = models.resnet18(pretrained=True, deep_base=False, strides=(1, 2, 2, 2), dilations=(1, 1, 1, 1))
+        elif layers == 34:
+            resnet = models.resnet34(pretrained=True, deep_base=False, strides=(1, 2, 2, 2), dilations=(1, 1, 1, 1))
         
-        self.sp = SpatialPath(in_channels=3, out_channels=128)
-        self.cp = ContextPath(in_channels=3, out_channels=128)
+        if self.with_sp:
+            self.sp = SpatialPath(in_channels=3, out_channels=128)
+        self.cp = ContextPath(in_channels=3, out_channels=128, backbone=resnet)
         self.ffm = FeatureFusionModule(
             in_channels=256, out_channels=256)  # concat: 128+128
-        self.conv_out = BiseNetHead(in_channels=256, mid_channels=256, num_classes=num_classes)
+        self.conv_out = BiseNetHead(in_channels=256, mid_channels=256, classes=classes)
 
         if self.training:
-            self.conv_out16 = BiseNetHead(in_channels=128, mid_channels=64, num_classes=num_classes)
-            self.conv_out32 = BiseNetHead(in_channels=128, mid_channels=64, num_classes=num_classes)
+            self.conv_out16 = BiseNetHead(in_channels=128, mid_channels=64, classes=classes)
+            self.conv_out32 = BiseNetHead(in_channels=128, mid_channels=64, classes=classes)
 
     def forward(self, x, y=None):
         H, W = x.size()[2:]
-        feat_sp = self.sp(x)
-        feat_cp8, feat_cp16 = self.cp(x)
+        if self.with_sp:
+            feat_sp = self.sp(x)
+            _, feat_cp8, feat_cp16 = self.cp(x)
+        else:
+            feat_sp, feat_cp8, feat_cp16 = self.cp(x)
         feat_fuse = self.ffm(feat_sp, feat_cp8)
 
         feat_out = self.conv_out(feat_fuse)
@@ -204,7 +214,7 @@ if __name__ == "__main__":
     import os
     os.environ['CUDA_VISIABLE_DEVICES'] = '0, 1'
     input = torch.rand(2, 3, 769, 769).cuda()
-    model = BiseNet(num_classes=19).cuda()
+    model = BiseNet(classes=19).cuda()
     model.eval()
     print(model)
     output = model(input)

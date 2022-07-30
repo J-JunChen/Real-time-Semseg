@@ -53,7 +53,7 @@ TEST:
   index_start: 0  # evaluation start index in list
   index_step: 0  # evaluation step index in list, 0 means to end
   test_gpu: [0]
-  model_path: exp/cityscapes/pspnet50/model/best.pth  # evaluation model path
-  save_folder: exp/cityscapes/pspnet50/result/epoch_200/val/ss  # results save folder
+  model_path: exp/cityscapes/pspnet50/model/last.pth  # evaluation model path
+  save_folder: exp/cityscapes/pspnet50/result/best/val/ss  # results save folder
   colors_path: data/cityscapes/cityscapes_colors.txt  # path of dataset colors
   names_path: data/cityscapes/cityscapes_names.txt  # path of dataset category names

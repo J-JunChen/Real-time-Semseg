@@ -19,7 +19,7 @@ cv2.ocl.setUseOpenCL(False)
 
 def get_parser():
     parser = argparse.ArgumentParser(description='PyTorch Semantic Segmentation')
-    parser.add_argument('--config', type=str, default='config/cityscapes/cityscapes_pspnet50.yaml', help='config file')
+    parser.add_argument('--config', type=str, default='config/cityscapes/cityscapes_bisenet_v1.yaml', help='config file')
     parser.add_argument('opts', help='see config/cityscapes/cityscapes_pspnet50.yaml for all options', default=None, nargs=argparse.REMAINDER)
     args = parser.parse_args()
     assert args.config is not None
@@ -44,10 +44,10 @@ def check(args):
     assert args.classes > 1
     assert args.zoom_factor in [1, 2, 4, 8]
     assert args.split in ['train', 'val', 'test']
-    if args.arch == 'psp' or args.arch == 'bise_v1':
-        assert (args.train_h - 1) % 8 == 0 and (args.train_w - 1) % 8 == 0
-    else:
-        raise Exception('architecture not supported yet'.format(args.arch))
+    # if args.arch == 'psp' or args.arch == 'bise_v1':
+    #     assert (args.train_h - 1) % 8 == 0 and (args.train_w - 1) % 8 == 0
+    # else:
+    #     raise Exception('architecture not supported yet'.format(args.arch))
 
 
 def main():
@@ -66,18 +66,28 @@ def main():
     std = [0.229, 0.224, 0.225]
     std = [item * value_scale for item in std]
 
+    test_h = int(args.base_h * args.scale + 1)
+    test_w = int(args.base_w * args.scale + 1)
+    
+    if args.teacher_model_path:
+        kd_path = 'alpha_' + str(args.alpha) + '_Temp_' + str(args.temperature)
+        kd_save = kd_path + '/val/ss'
+        args.save_folder = os.path.join(args.save_folder, kd_save)
+        args.save_path = os.path.join(args.save_path, kd_path)
+        args.model_path = os.path.join(args.save_path, args.model_path)
+
     gray_folder = os.path.join(args.save_folder, 'gray')
     color_folder = os.path.join(args.save_folder, 'color')
 
     test_transform = transform.Compose([transform.ToTensor()])
-    test_data = dataset.SemData(split=args.split, data_root=args.data_root, data_list=args.test_list, transform=test_transform)
+    test_data = dataset.SemData(split='test', data_root=args.data_root, data_list=args.test_list, transform=test_transform)
     index_start = args.index_start
     if args.index_step == 0:
         index_end = len(test_data.data_list)
     else:
         index_end = min(index_start + args.index_step, len(test_data.data_list))
     test_data.data_list = test_data.data_list[index_start:index_end]
-    test_loader = torch.utils.data.DataLoader(test_data, batch_size=1, shuffle=False, num_workers=args.workers, pin_memory=True)
+    test_loader = torch.utils.data.DataLoader(test_data, batch_size=1, shuffle=False, num_workers=4, pin_memory=True)
     colors = np.loadtxt(args.colors_path).astype('uint8')
     names = [line.rstrip('\n') for line in open(args.names_path)]
 
@@ -85,25 +95,34 @@ def main():
         if args.arch == 'psp':
             from model.pspnet import PSPNet
             model = PSPNet(layers=args.layers, classes=args.classes, zoom_factor=args.zoom_factor)
+        elif args.arch == 'nonlocal':
+            from model.nonlocal_net import Nonlocal
+            model = Nonlocal(layers=args.layers, classes=args.classes, zoom_factor=args.zoom_factor)
+        elif args.arch == 'sanet':
+            from model.sanet import SANet
+            model = SANet(layers=args.layers, classes=args.classes, zoom_factor=args.zoom_factor)
         elif args.arch == 'bise_v1':
             from model.bisenet_v1 import BiseNet
-            model = BiseNet(num_classes=args.classes)
+            model = BiseNet(layers=args.layers, classes=args.classes, with_sp=args.with_sp)
+        elif args.arch == 'fanet':
+            from model.fanet import FANet
+            model = FANet(layers=args.layers, classes=args.classes)
         logger.info(model)
         model = torch.nn.DataParallel(model).cuda()
         cudnn.benchmark = True
         if os.path.isfile(args.model_path):
             logger.info("=> loading checkpoint '{}'".format(args.model_path))
             checkpoint = torch.load(args.model_path)
-            model.load_state_dict(checkpoint['state_dict'], strict=False)
+            model.load_state_dict(checkpoint['state_dict'])
             logger.info("=> loaded checkpoint '{}'".format(args.model_path))
         else:
             raise RuntimeError("=> no checkpoint found at '{}'".format(args.model_path))
-        test(test_loader, test_data.data_list, model, args.classes, mean, std, args.base_size, args.test_h, args.test_w, args.scales, gray_folder, color_folder, colors)
+        test(test_loader, test_data.data_list, model, args.classes, mean, std, args.base_size, test_h, test_w, args.scales, gray_folder, color_folder, colors)
     if args.split != 'test':
         cal_acc(test_data.data_list, gray_folder, args.classes, names)
 
 
-def net_process(model, image, mean, std=None, flip=True):
+def net_process(model, image, mean, std=None, flip=False):
     input = torch.from_numpy(image.transpose((2, 0, 1))).float()
     if std is None:
         for t, m in zip(input, mean):
@@ -115,7 +134,10 @@ def net_process(model, image, mean, std=None, flip=True):
     if flip:
         input = torch.cat([input, input.flip(3)], 0)
     with torch.no_grad():
-        output = model(input)
+        if args.teacher_model_path != None and args.arch == 'sanet':
+            output, _, _ = model(input)
+        else:
+            output = model(input)
     _, _, h_i, w_i = input.shape
     _, _, h_o, w_o = output.shape
     if (h_o != h_i) or (w_o != w_i):
@@ -168,6 +190,7 @@ def test(test_loader, data_list, model, classes, mean, std, base_size, crop_h, c
     batch_time = AverageMeter()
     model.eval()
     end = time.time()
+    results = []
     with torch.no_grad():
         for i, (input, _) in enumerate(test_loader):
             data_time.update(time.time() - end)
@@ -187,6 +210,7 @@ def test(test_loader, data_list, model, classes, mean, std, base_size, crop_h, c
                 prediction += scale_process(model, image_scale, classes, crop_h, crop_w, h, w, mean, std)
             prediction /= len(scales)
             prediction = np.argmax(prediction, axis=2)
+            results.append(prediction)
             batch_time.update(time.time() - end)
             end = time.time()
             if ((i + 1) % 10 == 0) or (i + 1 == len(test_loader)):
@@ -195,17 +219,23 @@ def test(test_loader, data_list, model, classes, mean, std, base_size, crop_h, c
                             'Batch {batch_time.val:.3f} ({batch_time.avg:.3f}).'.format(i + 1, len(test_loader),
                                                                                         data_time=data_time,
                                                                                         batch_time=batch_time))
-            check_makedirs(gray_folder)
-            check_makedirs(color_folder)
-            gray = np.uint8(prediction)
-            color = colorize(gray, colors)
-            image_path, _ = data_list[i]
-            image_name = image_path.split('/')[-1].split('.')[0]
-            gray_path = os.path.join(gray_folder, image_name + '.png')
-            color_path = os.path.join(color_folder, image_name + '.png')
-            cv2.imwrite(gray_path, gray)
-            color.save(color_path)
+            # check_makedirs(gray_folder)
+            # check_makedirs(color_folder)
+            # gray = np.uint8(prediction)
+            # labelId = dataset._convert_to_label_id(gray)
+            # color = colorize(gray, colors)
+            # image_path, _ = data_list[i]
+            # image_name = image_path.split('/')[-1].split('.')[0]
+            # gray_path = os.path.join(gray_folder, image_name + '.png')
+            # label_path = os.path.join(gray_folder, image_name + '_ID.png')
+            # color_path = os.path.join(color_folder, image_name + '.png')
+            # cv2.imwrite(label_path, labelId)
+            # cv2.imwrite(gray_path, gray)
+            # color.save(color_path)
     logger.info('<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<')
+    logger.info('Convert to Label ID')
+    result_files = dataset.results2img(results=results, data_root=args.data_root, data_list=args.test_list, save_dir='./test_result', to_label_id=True)
+    logger.info('Convert to Label ID Finished')
 
 
 def cal_acc(data_list, pred_folder, classes, names):

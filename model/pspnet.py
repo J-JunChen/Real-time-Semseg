@@ -1,5 +1,6 @@
-# paper title: Pyramid scene parsing network
-# paper link: https://openaccess.thecvf.com/content_cvpr_2017/html/Zhao_Pyramid_Scene_Parsing_CVPR_2017_paper.html
+# paper title: Pyramid scene parsing network (CVPR 2017)
+# paper link: https://arxiv.org/abs/1612.01105
+# reference code: https://github.com/hszhao/semseg
 
 import torch
 from torch import nn
@@ -32,7 +33,7 @@ class PPM(nn.Module):
 class PSPNet(nn.Module):
     def __init__(self, layers=50, bins=(1, 2, 3, 6), dropout=0.1, classes=2, zoom_factor=8, use_ppm=True):
         super(PSPNet, self).__init__()
-        assert layers in [18, 34, 50, 101, 152]
+        assert layers in [18, 34, 50, 101]
         assert 2048 % len(bins) == 0
         assert classes > 1
         assert zoom_factor in [1, 2, 4, 8]
@@ -44,9 +45,11 @@ class PSPNet(nn.Module):
         elif layers == 34:
             resnet = models.resnet34(pretrained=True, deep_base=False, strides=(1, 2, 2, 2), dilations=(1, 1, 1, 1))
         elif layers == 50:
-            resnet = models.resnet50_semseg(pretrained=True, deep_base=True, strides=(1, 2, 1, 1), dilations=(1, 1, 2, 4))
+            # resnet = models.resnet50_semseg(pretrained=True, deep_base=True, strides=(1, 2, 1, 1), dilations=(1, 1, 2, 4))
+            resnet = models.resnet50_semseg(pretrained=True, deep_base=True, strides=(1, 2, 2, 2), dilations=(1, 1, 1, 1))
         elif layers == 101:
-            resnet = models.resnet101_semseg(pretrained=True, deep_base=True, strides=(1, 2, 1, 1), dilations=(1, 1, 2, 4))
+            # resnet = models.resnet101_semseg(pretrained=True, deep_base=True, strides=(1, 2, 1, 1), dilations=(1, 1, 2, 4))
+            resnet = models.resnet101_semseg(pretrained=True, deep_base=True, strides=(1, 2, 2, 2), dilations=(1, 1, 1, 1))
 
         if layers == 18 or layers == 34:
             self.layer0 = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu, resnet.maxpool)
@@ -81,13 +84,13 @@ class PSPNet(nn.Module):
                 nn.Conv2d(aux_dim // 4, classes, kernel_size=1)
             )
 
-    def forward(self, x, y=None, teacher_outputs=None):
-        x_size = x.size()
-        assert (x_size[2]-1) % 8 == 0 and (x_size[3] -
-                                           1) % 8 == 0  # examine for H and W
-        h = int((x_size[2] - 1) / 8 * self.zoom_factor + 1)
-        w = int((x_size[3] - 1) / 8 * self.zoom_factor + 1)
-
+    def forward(self, x):
+        # x_size = x.size()
+        # assert (x_size[2]-1) % 8 == 0 and (x_size[3] -
+        #                                    1) % 8 == 0  # examine for H and W
+        # h = int((x_size[2] - 1) / 8 * self.zoom_factor + 1)
+        # w = int((x_size[3] - 1) / 8 * self.zoom_factor + 1)
+        h, w = x.size()[2:]
         x = self.layer0(x)
         x = self.layer1(x)
         x = self.layer2(x)
@@ -96,15 +99,15 @@ class PSPNet(nn.Module):
         if self.use_ppm:
             x = self.ppm(x)
         x = self.cls(x)
-        if self.zoom_factor != 1:
-            x = F.interpolate(x, size=(h, w), mode='bilinear',
-                              align_corners=True)
+        # if self.zoom_factor != 1:
+        x = F.interpolate(x, size=(h, w), mode='bilinear',
+                            align_corners=True)
 
         if self.training:
             aux = self.aux(x_tmp)
-            if self.zoom_factor != 1:
-                aux = F.interpolate(aux, size=(
-                    h, w), mode='bilinear', align_corners=True)
+            # if self.zoom_factor != 1:
+            aux = F.interpolate(aux, size=(
+                h, w), mode='bilinear', align_corners=True)
             return x, aux
         else:
             return x

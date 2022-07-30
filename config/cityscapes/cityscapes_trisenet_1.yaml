@@ -1,0 +1,61 @@
+DATA:
+  data_root: dataset/cityscapes
+  train_list: dataset/cityscapes/list/fine_train.txt
+  val_list: dataset/cityscapes/list/fine_val.txt
+  classes: 19
+
+TRAIN:
+  arch: triple_1
+  layers: 18
+  teacher_model_path:
+  use_ohem: False
+  sync_bn: True # adopt syncbn or not
+  train_h: 1024 # image normal height: 1024
+  train_w: 1024 # image normal width: 2048
+  scale_min: 0.5
+  scale_max: 2.0
+  rotate_min: -10
+  rotate_max: 10
+  zoom_factor: 8  # input size zoom_factor
+  ignore_label: 255
+  aux_weight: 1.0
+  train_gpu: [0, 1, 2, 3]
+  workers: 16  # data loader workers
+  batch_size: 16
+  batch_size_val: 4 # batch size for validation during training, memory and speed tradeoff
+  base_lr: 0.01
+  power: 0.9
+  max_iter: 80000 # Max interation
+  start_iter: 0
+  momentum: 0.9
+  weight_decay: 0.0001
+  manual_seed:
+  print_freq: 10
+  save_freq: 1000
+  save_path: exp/cityscapes/trisenet_1/model
+  weight:  # path to initial weight
+  resume:  # exp/cityscapes/trisenet_1/model/last.pth
+  evaluate: True  # evaluate on validation set, extra gpu memory needed and small batch_size_val is recommend
+Distributed:
+  dist_url: tcp://127.0.0.1:6789
+  dist_backend: 'nccl'
+  multiprocessing_distributed: True
+  world_size: 1 # 分布式有1个主机
+  rank: 0 # 分布式0号主机
+
+TEST:
+  test_list: dataset/cityscapes/list/fine_test.txt
+  split: test  # split in [train, val and test]
+  base_size: 2048  # based size for scaling
+  base_h: 1024 # image normal height: 1024
+  base_w: 2048 # image normal width: 2048
+  scale: 0.5 # resize the normal image to smaller, e.g. val_h = base_h * scale. 0< scale <=1.0
+  scales: [1.0]  # evaluation scales, ms as [0.5, 0.75, 1.0, 1.25, 1.5, 1.75]
+  has_prediction: False  # has prediction already or not
+  index_start: 0  # evaluation start index in list
+  index_step: 0  # evaluation step index in list, 0 means to end
+  test_gpu: [2]
+  model_path: exp/cityscapes/trisenet_1/model/last.pth  # evaluation model path
+  save_folder: exp/cityscapes/trisenet_1/result/val/ss  # results save folder
+  colors_path: data/cityscapes/cityscapes_colors.txt  # path of dataset colors
+  names_path: data/cityscapes/cityscapes_names.txt  # path of dataset category names

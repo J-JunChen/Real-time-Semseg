@@ -314,7 +314,7 @@ def resnet101_semseg(pretrained=False, deep_base=True, **kwargs):
                 model_zoo.load_url(model_urls['resnet101_semseg']), strict=False)
         else:
             model.load_state_dict(torch.load(
-                local_urls['resnet101_semseg']), strict=False)
+                local_urls['resnet101_semseg'], map_location=torch.device('cpu')), strict=False)
     return model
 
 
